@@ -4,9 +4,12 @@ Created on Thu Dec  9 20:11:59 2021
 
 @author: mindlab
 """
-import torch.nn as nn
-import torch
 import math
+
+import torch
+import torch.nn as nn
+
+
 class SelfAttention(nn.Module):
     def __init__(self, dropout, **kwargs):
         super(SelfAttention, self).__init__(**kwargs)
@@ -19,9 +22,10 @@ class SelfAttention(nn.Module):
     def forward(self, queries, keys, values):
         d = queries.shape[-1]
         # 设置 `transpose_b=True` 为了交换 `keys` 的最后两个维度
-        scores = torch.bmm(queries, keys.transpose(1,2)) / math.sqrt(d)
+        scores = torch.bmm(queries, keys.transpose(1, 2)) / math.sqrt(d)
         self.attention_weights = torch.softmax(scores, dim=2)
         return torch.bmm(self.dropout(self.attention_weights), values)
+
 
 # =============================================================================
 # 未引入Multi-head机制前：X[batch_size,seq_len,feature_dim]
@@ -33,20 +37,24 @@ def transpose_qkv(X, num_heads):
     X = X.permute(0, 2, 1, 3)
     return X.reshape(-1, X.shape[2], X.shape[3])
 
+
 def transpose_output(X, num_heads):
     X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
     X = X.permute(0, 2, 1, 3)
     return X.reshape(X.shape[0], X.shape[1], -1)
 
+
 class CausalConv1d(torch.nn.Conv1d):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_size,
-                 stride=1,
-                 dilation=1,
-                 groups=1,
-                 bias=True):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        dilation=1,
+        groups=1,
+        bias=True,
+    ):
         self.__padding = (kernel_size - 1) * dilation
 
         super(CausalConv1d, self).__init__(
@@ -57,25 +65,41 @@ class CausalConv1d(torch.nn.Conv1d):
             padding=self.__padding,
             dilation=dilation,
             groups=groups,
-            bias=bias)
+            bias=bias,
+        )
 
     def forward(self, input):
         result = super(CausalConv1d, self).forward(input)
         if self.__padding != 0:
-            return result[:, :, :-self.__padding]
+            return result[:, :, : -self.__padding]
         return result
 
+
 class MultiHeadAttention(nn.Module):
-    def __init__(self, key_size, query_size, value_size, num_hiddens,
-                 num_heads, dropout, bias=False, **kwargs):
+    def __init__(
+        self,
+        key_size,
+        query_size,
+        value_size,
+        num_hiddens,
+        num_heads,
+        dropout,
+        bias=False,
+        **kwargs
+    ):
         super(MultiHeadAttention, self).__init__(**kwargs)
         self.num_heads = num_heads
         self.attention = SelfAttention(dropout)
-        self.W_q = nn.Linear(query_size, num_hiddens, bias=bias)#CausalConv1d(1, 1, kernel_size=7, stride=1)
-        self.W_k = nn.Linear(key_size, num_hiddens, bias=bias)#CausalConv1d(1, 1, kernel_size=7, stride=1)
-        self.W_v = nn.Linear(value_size, num_hiddens, bias=bias)#CausalConv1d(1, 1, kernel_size=7, stride=1)
+        self.W_q = nn.Linear(
+            query_size, num_hiddens, bias=bias
+        )  # CausalConv1d(1, 1, kernel_size=7, stride=1)
+        self.W_k = nn.Linear(
+            key_size, num_hiddens, bias=bias
+        )  # CausalConv1d(1, 1, kernel_size=7, stride=1)
+        self.W_v = nn.Linear(
+            value_size, num_hiddens, bias=bias
+        )  # CausalConv1d(1, 1, kernel_size=7, stride=1)
         self.W_o = nn.Linear(num_hiddens, num_hiddens, bias=bias)
-
 
     def forward(self, queries, keys, values):
         queries = transpose_qkv(self.W_q(queries), self.num_heads)
@@ -86,13 +110,14 @@ class MultiHeadAttention(nn.Module):
         output_concat = transpose_output(output, self.num_heads)
         return self.W_o(output_concat)
 
+
 # =============================================================================
 # batch_size, num_queries, num_hiddens, num_heads  = 2, 4, 100, 5
 # attention = MultiHeadAttention(num_hiddens, num_hiddens, num_hiddens, num_hiddens, num_heads, 0.5)
 # X = torch.ones((batch_size, num_queries, num_hiddens))
 # ans = attention(X, X, X)
 # print(ans.shape)
-# 
+#
 # attention = SelfAttention(dropout=0.5)
 # batch_size, num_queries, num_hiddens  = 2, 4, 10
 # X = torch.ones((batch_size, num_queries, num_hiddens))
